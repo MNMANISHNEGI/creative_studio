@@ -1,16 +1,12 @@
-const express     = require('express');
-const OpenAI      = require('openai');
+const express         = require('express');
 const { GoogleGenAI } = require('@google/genai');
-const pool        = require('../db');
-const requireAuth = require('../middleware/auth');
+const pool            = require('../db');
+const requireAuth     = require('../middleware/auth');
 
 const router = express.Router();
 router.use(requireAuth);
 
-/* ── OpenAI client (copywriting) ────────────────────────────────── */
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
-/* ── Gemini client (social + banner) ───────────────────────────── */
+/* ── Gemini client (all generation) ────────────────────────────── */
 const gemini = new GoogleGenAI({ apiKey: process.env.gemini_api_key });
 
 /* ── System prompt builder ─────────────────────────────────────── */
@@ -73,7 +69,7 @@ router.post('/copy', async (req, res) => {
     /* Generate all variants in parallel using Gemini */
     const requests = Array.from({ length: count }, () =>
       gemini.models.generateContent({
-        model:    'gemini-2.0-flash',
+        model:    'gemini-2.5-flash',
         contents: `${systemPrompt}\n\n${userMessage}`,
       })
     );
@@ -142,7 +138,7 @@ Write ONLY the social media post — no labels, no explanations. Output the post
 
   try {
     const response = await gemini.models.generateContent({
-      model: 'gemini-2.0-flash',
+      model: 'gemini-2.5-flash',
       contents: fullPrompt,
     });
 
