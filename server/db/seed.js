@@ -10,9 +10,19 @@ async function seed() {
     ON CONFLICT (email) DO UPDATE
       SET password_hash = EXCLUDED.password_hash,
           name          = EXCLUDED.name
-  `, ['user@indigo.com', hash, 'IndiGo User', 'Digital,ISC']);
+  `, ['user@indigo.com', hash, 'IndiGo User', 'Digital']);
 
-  console.log('✅ Seed complete — user@indigo.com / user123');
+  await pool.query(`
+    INSERT INTO users (email, password_hash, name, department)
+    VALUES ($1, $2, $3, $4)
+    ON CONFLICT (email) DO UPDATE
+      SET password_hash = EXCLUDED.password_hash,
+          name          = EXCLUDED.name
+  `, ['ai@indigo.com', hash, 'AI Studio User', 'AI & Innovation']);
+
+  console.log('✅ Seed complete');
+  console.log('   user@indigo.com / user123');
+  console.log('   ai@indigo.com   / user123');
   process.exit(0);
 }
 

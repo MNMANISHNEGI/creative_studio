@@ -214,9 +214,14 @@ export default function ProjectDetail() {
   const [activePlatform, setActivePlatform] = useState('twitter');
 
   /* social form */
-  const [campaignType, setCampaignType] = useState('');
-  const [socialPrompt, setSocialPrompt] = useState('');
-  const [selectedSize, setSelectedSize] = useState('');
+  const [campaignType,     setCampaignType]     = useState('');
+  const [socialPrompt,     setSocialPrompt]     = useState('');
+  const [selectedSize,     setSelectedSize]     = useState('');
+  const [socialCaption,    setSocialCaption]    = useState('');
+  const [socialGenerating, setSocialGenerating] = useState(false);
+  const [socialError,      setSocialError]      = useState('');
+  const [socialGenerated,  setSocialGenerated]  = useState(false);
+  const [socialCopied,     setSocialCopied]     = useState(false);
 
   /* copywriting form */
   const [cwCampaignType, setCwCampaignType] = useState('');
@@ -232,12 +237,15 @@ export default function ProjectDetail() {
   const [cwCopied,       setCwCopied]       = useState({});
 
   /* banner form */
-  const [brief,       setBrief]       = useState('');
-  const [refImages,   setRefImages]   = useState([]);
-  const [aspectRatio, setAspectRatio] = useState('16:9');
-  const [resolution,  setResolution]  = useState('1K');
-  const [customW,     setCustomW]     = useState('');
-  const [customH,     setCustomH]     = useState('');
+  const [brief,            setBrief]            = useState('');
+  const [refImages,        setRefImages]        = useState([]);
+  const [aspectRatio,      setAspectRatio]      = useState('16:9');
+  const [resolution,       setResolution]       = useState('1K');
+  const [customW,          setCustomW]          = useState('');
+  const [customH,          setCustomH]          = useState('');
+  const [bannerImageUrl,   setBannerImageUrl]   = useState('');
+  const [bannerGenerating, setBannerGenerating] = useState(false);
+  const [bannerError,      setBannerError]      = useState('');
   const fileInputRef = useRef(null);
 
   /* derived */
@@ -282,6 +290,51 @@ export default function ProjectDetail() {
     if (text) navigator.clipboard.writeText(text).catch(() => {});
     setCwCopied(prev => ({ ...prev, [index]: true }));
     setTimeout(() => setCwCopied(prev => ({ ...prev, [index]: false })), 2000);
+  };
+
+  const handleGenerateSocial = async () => {
+    if (!socialReady || socialGenerating) return;
+    setSocialGenerating(true);
+    setSocialError('');
+    setSocialGenerated(false);
+    setSocialCaption('');
+    try {
+      const result = await api.generateSocial({
+        project_id:    project.id,
+        campaign_type: campaignType,
+        platform:      activePlatform,
+        prompt:        socialPrompt,
+      });
+      setSocialCaption(result.caption || '');
+      setSocialGenerated(true);
+      setSocialCopied(false);
+    } catch (err) {
+      setSocialError(err.message || 'Generation failed.');
+    } finally {
+      setSocialGenerating(false);
+    }
+  };
+
+  const handleGenerateBanner = async () => {
+    if (!bannerReady || bannerGenerating) return;
+    setBannerGenerating(true);
+    setBannerError('');
+    setBannerImageUrl('');
+    try {
+      const result = await api.generateBanner({
+        project_id:   project.id,
+        brief,
+        aspect_ratio: aspectRatio,
+        resolution,
+        custom_width:  customW || undefined,
+        custom_height: customH || undefined,
+      });
+      setBannerImageUrl(result.imageUrl || '');
+    } catch (err) {
+      setBannerError(err.message || 'Image generation failed.');
+    } finally {
+      setBannerGenerating(false);
+    }
   };
 
   const handleVariationStep = (delta) => {
@@ -415,9 +468,18 @@ export default function ProjectDetail() {
                       <input className="pd-input" type="number" placeholder="e.g. 1080" value={customH} onChange={e => setCustomH(e.target.value)} min={1} />
                     </div>
                   </div>
-                  <button className={`pd-generate-btn ${bannerReady ? 'ready' : 'disabled'}`} disabled={!bannerReady}>
-                    Generate website image
+                  <button
+                    className={`pd-generate-btn ${bannerReady && !bannerGenerating ? 'ready' : 'disabled'}`}
+                    disabled={!bannerReady || bannerGenerating}
+                    onClick={handleGenerateBanner}
+                  >
+                    {bannerGenerating ? (
+                      <><span className="pd-gen-spinner" />Generating image…</>
+                    ) : (
+                      'Generate website image'
+                    )}
                   </button>
+                  {bannerError && <div className="pd-gen-error">{bannerError}</div>}
                 </>
               )}
 
@@ -575,14 +637,25 @@ export default function ProjectDetail() {
                       <svg className="pd-select-arrow" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 6l4 4 4-4" strokeLinecap="round" strokeLinejoin="round" /></svg>
                     </div>
                   </div>
-                  <button className={`pd-generate-btn ${socialReady ? 'ready' : 'disabled'}`} disabled={!socialReady}>
-                    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" className="pd-gen-icon">
-                      <path d="M10 3v2M10 15v2M3 10H1M19 10h-2M5.05 5.05 3.636 3.636M16.364 16.364l-1.414-1.414M5.05 14.95l-1.414 1.414M16.364 3.636l-1.414 1.414" strokeLinecap="round" />
-                      <circle cx="10" cy="10" r="3.5" />
-                    </svg>
-                    Generate Creative
+                  <button
+                    className={`pd-generate-btn ${socialReady && !socialGenerating ? 'ready' : 'disabled'}`}
+                    disabled={!socialReady || socialGenerating}
+                    onClick={handleGenerateSocial}
+                  >
+                    {socialGenerating ? (
+                      <><span className="pd-gen-spinner" />Generating…</>
+                    ) : (
+                      <>
+                        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" className="pd-gen-icon">
+                          <path d="M10 3v2M10 15v2M3 10H1M19 10h-2M5.05 5.05 3.636 3.636M16.364 16.364l-1.414-1.414M5.05 14.95l-1.414 1.414M16.364 3.636l-1.414 1.414" strokeLinecap="round" />
+                          <circle cx="10" cy="10" r="3.5" />
+                        </svg>
+                        Generate Creative
+                      </>
+                    )}
                   </button>
-                  {!socialReady && <p className="pd-hint">Select a campaign type and describe your campaign to generate.</p>}
+                  {socialError && <div className="pd-gen-error">{socialError}</div>}
+                  {!socialReady && !socialError && <p className="pd-hint">Select a campaign type and describe your campaign to generate.</p>}
                 </>
               )}
             </div>
@@ -620,7 +693,24 @@ export default function ProjectDetail() {
                   </div>
                 </div>
                 <div className="pd-result-area">
-                  {!bannerReady ? (
+                  {bannerGenerating ? (
+                    <div className="pd-banner-loading">
+                      <span className="pd-gen-spinner" style={{ borderTopColor: '#0033A0', borderColor: 'rgba(0,51,160,0.2)', width: 32, height: 32, borderWidth: 3 }} />
+                      <p>Generating with Imagen 3…</p>
+                      <span className="pd-banner-loading-sub">This may take 10–20 seconds</span>
+                    </div>
+                  ) : bannerImageUrl ? (
+                    <div className="pd-banner-result">
+                      <img src={bannerImageUrl} alt="Generated banner" className="pd-banner-img" />
+                      <a
+                        className="pd-banner-download-btn"
+                        href={bannerImageUrl}
+                        download="indigo-banner.jpg"
+                      >
+                        Download
+                      </a>
+                    </div>
+                  ) : !bannerReady ? (
                     <EmptyCanvas message="Fill in the creative brief on the left to generate your website banner." />
                   ) : (
                     <div className="pd-banner-placeholder">
@@ -630,7 +720,7 @@ export default function ProjectDetail() {
                           <circle cx="30" cy="28" r="10" />
                           <path d="M1 50l25-20 18 18 14-14 40 32" />
                         </svg>
-                        <p>Generated banner will appear here</p>
+                        <p>Click "Generate website image" to create your banner</p>
                       </div>
                     </div>
                   )}
@@ -718,25 +808,64 @@ export default function ProjectDetail() {
                       <span className="pd-canvas-tag">{CAMPAIGN_TYPES.find(c => c.value === campaignType)?.emoji} {CAMPAIGN_TYPES.find(c => c.value === campaignType)?.label}</span>
                       <span className="pd-canvas-tag tag-plat">{SOCIAL_PLATFORMS.find(p => p.id === activePlatform)?.label}</span>
                     </div>
-                    <span className="pd-canvas-status">Waiting to generate</span>
+                    {socialGenerated && (
+                      <div className="pd-social-header-actions">
+                        <button
+                          className={`pd-result-btn ${socialCopied ? 'copied' : ''}`}
+                          onClick={() => {
+                            navigator.clipboard.writeText(socialCaption).catch(() => {});
+                            setSocialCopied(true);
+                            setTimeout(() => setSocialCopied(false), 2000);
+                          }}
+                        >
+                          {socialCopied ? '✓ Copied' : 'Copy'}
+                        </button>
+                        <button className="pd-result-btn" onClick={handleGenerateSocial}>Regenerate</button>
+                      </div>
+                    )}
+                    {!socialGenerated && <span className="pd-canvas-status">{socialGenerating ? 'Generating…' : 'Waiting to generate'}</span>}
                   </div>
-                  <div className="pd-mockup-area">
-                    <div className="pd-social-mockup">
-                      <div className="pd-mockup-header-row">
-                        <div className="pd-mockup-avatar" />
-                        <div><div className="pd-mockup-name-bar" /><div className="pd-mockup-date-bar" /></div>
-                      </div>
-                      <div className="pd-mockup-img-placeholder">
-                        <svg viewBox="0 0 60 48" fill="none" stroke="#c7d2f0" strokeWidth="1.5" width="60" height="48">
-                          <rect x="2" y="2" width="56" height="44" rx="4" /><circle cx="20" cy="18" r="6" />
-                          <path d="M2 34l14-12 10 10 8-8 24 18" />
-                        </svg>
-                        <p>Creative will appear here after generation</p>
-                      </div>
-                      <div className="pd-mockup-caption-bar" />
-                      <div className="pd-mockup-caption-bar short" />
+
+                  {socialGenerating ? (
+                    <div className="pd-social-loading">
+                      <span className="pd-gen-spinner" style={{ borderTopColor: '#0033A0', borderColor: 'rgba(0,51,160,0.2)', width: 28, height: 28, borderWidth: 3 }} />
+                      <p>Generating with Gemini…</p>
                     </div>
-                  </div>
+                  ) : socialGenerated ? (
+                    <div className="pd-social-result">
+                      <div className="pd-social-mockup">
+                        <div className="pd-mockup-header-row">
+                          <div className="pd-mockup-avatar" />
+                          <div><div className="pd-mockup-name-bar" /><div className="pd-mockup-date-bar" /></div>
+                        </div>
+                        <div className="pd-mockup-img-placeholder">
+                          <svg viewBox="0 0 60 48" fill="none" stroke="#c7d2f0" strokeWidth="1.5" width="60" height="48">
+                            <rect x="2" y="2" width="56" height="44" rx="4" /><circle cx="20" cy="18" r="6" />
+                            <path d="M2 34l14-12 10 10 8-8 24 18" />
+                          </svg>
+                        </div>
+                        <p className="pd-social-caption-text">{socialCaption}</p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="pd-mockup-area">
+                      <div className="pd-social-mockup">
+                        <div className="pd-mockup-header-row">
+                          <div className="pd-mockup-avatar" />
+                          <div><div className="pd-mockup-name-bar" /><div className="pd-mockup-date-bar" /></div>
+                        </div>
+                        <div className="pd-mockup-img-placeholder">
+                          <svg viewBox="0 0 60 48" fill="none" stroke="#c7d2f0" strokeWidth="1.5" width="60" height="48">
+                            <rect x="2" y="2" width="56" height="44" rx="4" /><circle cx="20" cy="18" r="6" />
+                            <path d="M2 34l14-12 10 10 8-8 24 18" />
+                          </svg>
+                          <p>Creative will appear here after generation</p>
+                        </div>
+                        <div className="pd-mockup-caption-bar" />
+                        <div className="pd-mockup-caption-bar short" />
+                      </div>
+                    </div>
+                  )}
                 </div>
               )
             )}

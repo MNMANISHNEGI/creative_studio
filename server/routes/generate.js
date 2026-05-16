@@ -1,13 +1,17 @@
 const express     = require('express');
 const OpenAI      = require('openai');
+const { GoogleGenAI } = require('@google/genai');
 const pool        = require('../db');
 const requireAuth = require('../middleware/auth');
 
 const router = express.Router();
 router.use(requireAuth);
 
-/* ── OpenAI client ──────────────────────────────────────────────── */
+/* ── OpenAI client (copywriting) ────────────────────────────────── */
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+/* ── Gemini client (social + banner) ───────────────────────────── */
+const gemini = new GoogleGenAI({ apiKey: process.env.gemini_api_key });
 
 /* ── System prompt builder ─────────────────────────────────────── */
 function buildSystemPrompt(contentType, tone, language) {
@@ -66,21 +70,16 @@ router.post('/copy', async (req, res) => {
     const systemPrompt = buildSystemPrompt(content_type, tone, language);
     const userMessage  = `Campaign context: ${prompt.trim()}\nCampaign type: ${campaign_type || 'general'}`;
 
-    /* Generate all variants in parallel */
+    /* Generate all variants in parallel using Gemini */
     const requests = Array.from({ length: count }, () =>
-      openai.chat.completions.create({
-        model:       'gpt-4o-mini',
-        max_tokens:  400,
-        temperature: 0.85,
-        messages: [
-          { role: 'system',  content: systemPrompt },
-          { role: 'user',    content: userMessage  },
-        ],
+      gemini.models.generateContent({
+        model:    'gemini-2.0-flash',
+        contents: `${systemPrompt}\n\n${userMessage}`,
       })
     );
 
     const responses = await Promise.all(requests);
-    const variants  = responses.map(r => r.choices[0]?.message?.content?.trim() || '');
+    const variants  = responses.map(r => r.text?.trim() || '');
 
     const output = { variants };
 
@@ -102,7 +101,7 @@ router.post('/copy', async (req, res) => {
   }
 });
 
-/* ── POST /api/generate/social ─────────────────────────────────── */
+/* ── POST /api/generate/social (Gemini Flash) ──────────────────── */
 router.post('/social', async (req, res) => {
   const {
     project_id, campaign_type, platform = 'general',
@@ -112,19 +111,42 @@ router.post('/social', async (req, res) => {
   if (!project_id || !prompt?.trim())
     return res.status(400).json({ error: 'project_id and prompt are required' });
 
-  try {
-    const systemPrompt = buildSystemPrompt('caption', tone, language);
-    const userMessage  = `Platform: ${platform}\nCampaign: ${prompt.trim()}`;
+  const platLabels = {
+    twitter: 'X (Twitter) — max 280 chars, punchy, include 2-3 hashtags',
+    facebook: 'Facebook — conversational, 1-3 sentences, include a CTA',
+    whatsapp: 'WhatsApp broadcast — friendly, direct, max 200 chars',
+    instagram: 'Instagram — engaging caption, 3-5 hashtags, emoji welcome',
+    general: 'General social media — versatile, clear, with a CTA',
+  };
 
-    const response = await openai.chat.completions.create({
-      model: 'gpt-4o-mini', max_tokens: 500, temperature: 0.85,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user',   content: userMessage  },
-      ],
+  const toneMap = {
+    playful: 'fun, upbeat, and energetic',
+    urgent: 'urgent, action-driving, create FOMO',
+    inspirational: 'inspiring and aspirational',
+    professional: 'professional, clear, brand-safe',
+  };
+
+  const langNote = language === 'hindi'
+    ? 'Write in Hindi (Devanagari script). Keep brand names and numbers in English.'
+    : 'Write in English.';
+
+  const fullPrompt = `You are a senior social media copywriter for IndiGo (6E), India's largest low-cost airline.
+Brand voice: bold, friendly, no-frills, optimistic. Tagline: "On-time. Hassle-free. Affordable."
+Tone: ${toneMap[tone] || 'professional'}.
+Platform: ${platLabels[platform] || platLabels.general}.
+Language: ${langNote}
+Campaign type: ${campaign_type || 'general'}
+Campaign brief: ${prompt.trim()}
+
+Write ONLY the social media post — no labels, no explanations. Output the post text directly.`;
+
+  try {
+    const response = await gemini.models.generateContent({
+      model: 'gemini-2.0-flash',
+      contents: fullPrompt,
     });
 
-    const caption = response.choices[0]?.message?.content?.trim() || '';
+    const caption = response.text?.trim() || '';
     const output  = { variants: [caption], platform };
 
     const { rows } = await pool.query(
@@ -141,26 +163,58 @@ router.post('/social', async (req, res) => {
   }
 });
 
-/* ── POST /api/generate/banner (placeholder — image gen later) ─── */
+/* ── POST /api/generate/banner (Gemini Imagen 3) ───────────────── */
 router.post('/banner', async (req, res) => {
-  const { project_id, brief, aspect_ratio = '16:9', resolution = '1K' } = req.body;
+  const {
+    project_id, brief, aspect_ratio = '16:9', resolution = '1K',
+    custom_width, custom_height,
+  } = req.body;
+
   if (!project_id || !brief?.trim())
     return res.status(400).json({ error: 'project_id and brief are required' });
 
+  /* Map aspect ratio to Imagen-supported values */
+  const ratioMap = {
+    '16:9': '16:9', '1:1': '1:1', '4:5': '4:5',
+    '9:16': '9:16', '3:2': '3:4', 'Custom': '1:1',
+  };
+  const imagenRatio = ratioMap[aspect_ratio] || '16:9';
+
+  const imagePrompt = `A high-quality, professional marketing banner for IndiGo (6E), India's low-cost airline.
+Brand colors: deep blue (#0033A0) and white. Modern, clean, aviation-themed.
+Creative brief: ${brief.trim()}
+Resolution hint: ${resolution}. Aspect ratio: ${aspect_ratio}.
+${custom_width && custom_height ? `Target size: ${custom_width}×${custom_height}px.` : ''}
+Style: professional advertising banner, photorealistic, no text overlays, premium airline brand.`;
+
   try {
-    /* Placeholder — DALL-E integration goes here when image API is ready */
-    const output = { imageUrl: null, brief, aspect_ratio, resolution, status: 'pending' };
+    const response = await gemini.models.generateImages({
+      model: 'imagen-4.0-generate-001',
+      prompt: imagePrompt,
+      config: {
+        numberOfImages: 1,
+        outputMimeType: 'image/jpeg',
+        aspectRatio: imagenRatio,
+      },
+    });
+
+    const imageBytes = response.generatedImages?.[0]?.image?.imageBytes;
+    if (!imageBytes) throw new Error('No image returned from Imagen');
+
+    const imageUrl = `data:image/jpeg;base64,${imageBytes}`;
+    const output   = { imageUrl, brief, aspect_ratio, resolution, status: 'done' };
 
     const { rows } = await pool.query(
       `INSERT INTO generations
          (project_id, user_id, tab_type, prompt, output)
-       VALUES ($1,$2,'banner',$3,$4) RETURNING *`,
+       VALUES ($1,$2,'banner',$3,$4) RETURNING id, project_id, tab_type, created_at`,
       [project_id, req.user.id, brief.trim(), output]
     );
 
-    res.json({ generation: rows[0], message: 'Banner queued — image generation coming soon' });
+    res.json({ generation: rows[0], imageUrl });
   } catch (err) {
-    res.status(500).json({ error: 'Server error' });
+    console.error('Generate banner error:', err?.message);
+    res.status(500).json({ error: err?.message || 'Image generation failed' });
   }
 });
 
